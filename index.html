@@ -11,7 +11,13 @@
         .row { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 6px 0; }
         .line { font-weight: bold; width: 80px; color: #ffcc00; }
         .dest { flex-grow: 1; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-right: 10px; }
-        .time { width: 80px; text-align: right; color: #ffcc00; }
+        
+        /* 通常の時刻スタイル */
+        .time { width: 110px; text-align: right; color: #ffcc00; }
+        
+        /* ★遅延発生時の赤色強調スタイル */
+        .time.delayed { color: #ff4444; font-weight: bold; }
+        
         .status { color: #888; font-size: 13px; margin-bottom: 15px; border-bottom: 1px dashed #444; padding-bottom: 5px; }
         .error { color: #ff4444; font-size: 14px; }
     </style>
@@ -21,7 +27,6 @@
     <div id="board"></div>
 
     <script>
-        // ★表示したい3つの駅名を指定（自由に書き換えてOK）
         const stationNames = [
             "S Gehrenseestr.",
             "Seehausener Str.",
@@ -34,10 +39,8 @@
             statusEl.innerText = "Status: データ更新中...";
 
             try {
-                // 3つの駅のデータを並列で同時取得
                 const htmlBlocks = await Promise.all(stationNames.map(async (name) => {
                     try {
-                        // 1. 駅IDの取得
                         const locRes = await fetch(`https://v6.bvg.transport.rest/locations?query=${encodeURIComponent(name)}&results=1`);
                         if (!locRes.ok) throw new Error("検索失敗");
                         const locData = await locRes.json();
@@ -46,7 +49,6 @@
                         const stationId = locData[0].id;
                         const officialName = locData[0].name;
 
-                        // 2. 出発情報の取得（各駅4件ずつ表示）
                         const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=60&results=4`);
                         if (!depRes.ok) throw new Error("取得失敗");
                         const data = await depRes.json();
@@ -55,13 +57,24 @@
                         let rowsHtml = list.map(d => {
                             const line = (d.line && d.line.name) ? d.line.name : "---";
                             const dest = (d.destination && d.destination.name) ? d.destination.name : "不明";
+                            
+                            // 遅延計算（秒数を分単位に変換 / 1分以上の遅延で判定）
+                            const delaySeconds = d.delay || 0;
+                            const delayMinutes = Math.floor(delaySeconds / 60);
+                            const isDelayed = delayMinutes >= 1;
+
                             const timeVal = d.when || d.plannedWhen;
-                            const time = timeVal ? new Date(timeVal).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "--:--";
+                            const timeStr = timeVal ? new Date(timeVal).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "--:--";
+                            
+                            // 遅延時は「14:35 (+2)」のように赤色で表示
+                            const timeDisplay = isDelayed ? `${timeStr} (+${delayMinutes})` : timeStr;
+                            const timeClass = isDelayed ? "time delayed" : "time";
+
                             return `
                                 <div class="row">
                                     <span class="line">${line}</span>
                                     <span class="dest">${dest}</span>
-                                    <span class="time">${time}</span>
+                                    <span class="${timeClass}">${timeDisplay}</span>
                                 </div>
                             `;
                         }).join('');
@@ -94,7 +107,7 @@
         }
 
         fetchAllDepartures();
-        setInterval(fetchAllDepartures, 30000); // 30秒ごとに自動更新
+        setInterval(fetchAllDepartures, 30000);
     </script>
 </body>
 </html>
