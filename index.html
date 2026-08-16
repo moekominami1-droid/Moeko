@@ -37,24 +37,33 @@
             statusEl.innerText = "Status: データ更新中...";
 
             try {
-                // 10分後の時刻（ISOフォーマット）を計算
-                const futureTime = new Date(Date.now() + minMinutesAhead * 60 * 1000).toISOString();
+                const now = Date.now();
+                const minOffsetMs = minMinutesAhead * 60 * 1000;
 
                 const htmlBlocks = await Promise.all(stationNames.map(async (name) => {
                     try {
+                        // 1. 駅の検索
                         const locRes = await fetch(`https://v6.bvg.transport.rest/locations?query=${encodeURIComponent(name)}&results=1`);
-                        if (!locRes.ok) throw new Error("検索失敗");
+                        if (!locRes.ok) throw new Error("検索失敗 (" + locRes.status + ")");
                         const locData = await locRes.json();
                         if (!locData || locData.length === 0) throw new Error("駅が見つかりません");
                         
                         const stationId = locData[0].id;
                         const officialName = locData[0].name;
 
-                        // ★APIに対して「10分後の時刻から指定して4件取得する」ようにリクエスト
-                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?when=${encodeURIComponent(futureTime)}&duration=60&results=4`);
-                        if (!depRes.ok) throw new Error("取得失敗");
+                        // 2. 出発情報の取得（30件取得してフィルタリングの余裕を持たせる）
+                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=90&results=30`);
+                        if (!depRes.ok) throw new Error("取得失敗 (" + depRes.status + ")");
                         const data = await depRes.json();
-                        const list = Array.isArray(data) ? data : (data.departures || []);
+                        const rawList = Array.isArray(data) ? data : (data.departures || []);
+
+                        // 10分後以降の便だけに絞り込んで上位4件を取得
+                        const list = rawList.filter(d => {
+                            const timeVal = d.when || d.plannedWhen;
+                            if (!timeVal) return false;
+                            const depTime = new Date(timeVal).getTime();
+                            return (depTime - now) >= minOffsetMs;
+                        }).slice(0, 4);
 
                         let rowsHtml = list.map(d => {
                             const line = (d.line && d.line.name) ? d.line.name : "---";
