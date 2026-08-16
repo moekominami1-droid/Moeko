@@ -1,45 +1,36 @@
+HTML
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <style>
-        body { background-color: #000; color: #ffcc00; font-family: monospace; margin: 0; padding: 20px; font-size: 20px; }
+        body { background-color: #000; color: #ffcc00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; font-size: 24px; }
         .row { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 10px 0; }
         .line { font-weight: bold; width: 80px; }
         .dest { flex-grow: 1; }
         .time { width: 100px; text-align: right; }
-        .row { text-shadow: 0 0 8px #ffcc00; }
+        /* LED風の光彩効果 */
+        h1, .row { text-shadow: 0 0 10px #ffcc00; }
     </style>
 </head>
 <body>
-    <div id="board">データ読み込み中...</div>
+    <div id="board">Loading...</div>
     <script>
-        var stationId = "900000100001"; // Alexanderplatz
-        function loadData() {
-            var url = "https://v6.bvg.transport.rest/stops/" + stationId + "/departures?duration=60&results=8";
-            fetch(url)
-                .then(function(res) { return res.json(); })
-                .then(function(data) {
-                    var html = "";
-                    for (var i = 0; i < data.length; i++) {
-                        var d = data[i];
-                        var timeStr = new Date(d.when).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-                        var lineName = d.line ? d.line.name : "";
-                        var destName = d.destination ? d.destination.name : "";
-                        html += '<div class="row">' +
-                                '<span class="line">' + lineName + '</span>' +
-                                '<span class="dest">' + destName + '</span>' +
-                                '<span class="time">' + timeStr + '</span>' +
-                                '</div>';
-                    }
-                    document.getElementById("board").innerHTML = html;
-                })
-                .catch(function(err) {
-                    document.getElementById("board").innerHTML = "エラーが発生しました: " + err;
-                });
+        const stationId = "900000100001"; // Alexanderplatz
+        async function fetchDepartures() {
+            const res = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=60&results=8`);
+            const data = await res.json();
+            const board = document.getElementById('board');
+            board.innerHTML = data.map(d => `
+                <div class="row">
+                    <span class="line">${d.line.name}</span>
+                    <span class="dest">${d.destination.name}</span>
+                    <span class="time">${new Date(d.when).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                </div>
+            `).join('');
         }
-        loadData();
-        setInterval(loadData, 30000);
+        fetchDepartures();
+        setInterval(fetchDepartures, 30000); // 30秒ごとに更新
     </script>
 </body>
 </html>
