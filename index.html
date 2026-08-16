@@ -22,42 +22,81 @@
     <div id="board"></div>
 
     <script>
-        const stationNames = [
-            "S Gehrenseestr.",
-            "Seehausener Str.",
-            "S Hohenschönhausen"
+        const stations = [
+            { query: "S Gehrenseestr.", name: "S Gehrenseestr.", id: null },
+            { query: "Seehausener Str.", name: "Seehausener Str.", id: null },
+            { query: "S Hohenschönhausen", name: "S Hohenschönhausen", id: null }
         ];
 
-        // ★何分後以降の便を表示するか
         const minMinutesAhead = 10;
+        const PRIMARY_API = "https://v6.bvg.transport.rest";
+        const FALLBACK_API = "https://v6.vbb.transport.rest";
+
+        // メインAPI失敗時にサブAPIへ自動切替する関数
+        async function fetchApi(endpoint) {
+            try {
+                const res = await fetch(PRIMARY_API + endpoint);
+                if (res.ok) return await res.json();
+            } catch (e) {
+                console.warn("メインAPI接続失敗。サブAPIに切り替えます。", e);
+            }
+            const resFallback = await fetch(FALLBACK_API + endpoint);
+            if (!resFallback.ok) throw new Error("通信エラー (" + resFallback.status + ")");
+            return await resFallback.json();
+        }
+
+        // 初回のみ：駅名から駅IDを特定して保持
+        async function initStations() {
+            const statusEl = document.getElementById('status');
+            statusEl.innerText = "Status: 駅情報を初期設定中...";
+
+            for (let s of stations) {
+                if (!s.id) {
+                    try {
+                        const locData = await fetchApi(`/locations?query=${encodeURIComponent(s.query)}&results=1`);
+                        if (locData && locData.length > 0) {
+                            s.id = locData[0].id;
+                            s.name = locData[0].name;
+                        }
+                    } catch (e) {
+                        console.error("駅ID取得失敗:", s.query, e);
+                    }
+                }
+            }
+        }
 
         async function fetchAllDepartures() {
             const statusEl = document.getElementById('status');
             const boardEl = document.getElementById('board');
+
+            // ID未取得の場合は初期化を実行
+            if (stations.some(s => !s.id)) {
+                await initStations();
+            }
+
             statusEl.innerText = "Status: データ更新中...";
+            const now = Date.now();
+            const minOffsetMs = minMinutesAhead * 60 * 1000;
 
             try {
-                const now = Date.now();
-                const minOffsetMs = minMinutesAhead * 60 * 1000;
+                let htmlBlocks = [];
 
-                const htmlBlocks = await Promise.all(stationNames.map(async (name) => {
+                // 順番にリクエストを発行して負荷を分散
+                for (let s of stations) {
+                    if (!s.id) {
+                        htmlBlocks.push(`
+                            <div class="station-block">
+                                <div class="station-title">🚉 ${s.name}</div>
+                                <div class="error">⚠️ 駅IDの特定に失敗しました</div>
+                            </div>
+                        `);
+                        continue;
+                    }
+
                     try {
-                        // 1. 駅の検索
-                        const locRes = await fetch(`https://v6.bvg.transport.rest/locations?query=${encodeURIComponent(name)}&results=1`);
-                        if (!locRes.ok) throw new Error("検索失敗 (" + locRes.status + ")");
-                        const locData = await locRes.json();
-                        if (!locData || locData.length === 0) throw new Error("駅が見つかりません");
-                        
-                        const stationId = locData[0].id;
-                        const officialName = locData[0].name;
-
-                        // 2. 出発情報の取得（30件取得してフィルタリングの余裕を持たせる）
-                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=90&results=30`);
-                        if (!depRes.ok) throw new Error("取得失敗 (" + depRes.status + ")");
-                        const data = await depRes.json();
+                        const data = await fetchApi(`/stops/${s.id}/departures?duration=90&results=30`);
                         const rawList = Array.isArray(data) ? data : (data.departures || []);
 
-                        // 10分後以降の便だけに絞り込んで上位4件を取得
                         const list = rawList.filter(d => {
                             const timeVal = d.when || d.plannedWhen;
                             if (!timeVal) return false;
@@ -68,14 +107,12 @@
                         let rowsHtml = list.map(d => {
                             const line = (d.line && d.line.name) ? d.line.name : "---";
                             const dest = (d.destination && d.destination.name) ? d.destination.name : "不明";
-                            
                             const delaySeconds = d.delay || 0;
                             const delayMinutes = Math.floor(delaySeconds / 60);
                             const isDelayed = delayMinutes >= 1;
 
                             const timeVal = d.when || d.plannedWhen;
                             const timeStr = timeVal ? new Date(timeVal).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "--:--";
-                            
                             const timeDisplay = isDelayed ? `${timeStr} (+${delayMinutes})` : timeStr;
                             const timeClass = isDelayed ? "time delayed" : "time";
 
@@ -92,21 +129,22 @@
                             rowsHtml = `<div class="row"><span class="dest">${minMinutesAhead}分後以降の出発予定なし</span></div>`;
                         }
 
-                        return `
+                        htmlBlocks.push(`
                             <div class="station-block">
-                                <div class="station-title">🚉 ${officialName}</div>
+                                <div class="station-title">🚉 ${s.name}</div>
                                 ${rowsHtml}
                             </div>
-                        `;
+                        `);
+
                     } catch (e) {
-                        return `
+                        htmlBlocks.push(`
                             <div class="station-block">
-                                <div class="station-title">🚉 ${name}</div>
-                                <div class="error">⚠️ エラー: ${e.message}</div>
+                                <div class="station-title">🚉 ${s.name}</div>
+                                <div class="error">⚠️ 通信失敗: ${e.message}</div>
                             </div>
-                        `;
+                        `);
                     }
-                }));
+                }
 
                 boardEl.innerHTML = htmlBlocks.join('');
                 statusEl.innerText = `Status: 正常更新完了 (${new Date().toLocaleTimeString()})`;
@@ -117,8 +155,13 @@
             }
         }
 
-        fetchAllDepartures();
-        setInterval(fetchAllDepartures, 30000);
+        async function start() {
+            await initStations();
+            await fetchAllDepartures();
+            setInterval(fetchAllDepartures, 30000); // 30秒ごとに自動更新
+        }
+
+        start();
     </script>
 </body>
 </html>
