@@ -3,15 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BVG Departures</title>
+    <title>BVG Departures - 3 Stations</title>
     <style>
-        body { background-color: #000; color: #ffcc00; font-family: monospace; padding: 20px; font-size: 20px; }
-        .row { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 10px 0; }
-        .line { font-weight: bold; width: 90px; color: #ffcc00; }
-        .dest { flex-grow: 1; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-        .time { width: 90px; text-align: right; color: #ffcc00; }
-        .status { color: #888; font-size: 14px; margin-bottom: 15px; border-bottom: 1px dashed #444; padding-bottom: 5px; }
-        .error { color: #ff4444; background: #220000; padding: 10px; border: 1px solid #ff4444; }
+        body { background-color: #000; color: #ffcc00; font-family: monospace; padding: 15px; font-size: 18px; margin: 0; }
+        .station-block { margin-bottom: 20px; }
+        .station-title { font-size: 20px; font-weight: bold; color: #fff; border-bottom: 2px solid #ffcc00; padding-bottom: 4px; margin-bottom: 8px; }
+        .row { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 6px 0; }
+        .line { font-weight: bold; width: 80px; color: #ffcc00; }
+        .dest { flex-grow: 1; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-right: 10px; }
+        .time { width: 80px; text-align: right; color: #ffcc00; }
+        .status { color: #888; font-size: 13px; margin-bottom: 15px; border-bottom: 1px dashed #444; padding-bottom: 5px; }
+        .error { color: #ff4444; font-size: 14px; }
     </style>
 </head>
 <body>
@@ -19,59 +21,80 @@
     <div id="board"></div>
 
     <script>
-        const stationId = "900000100001"; // Alexanderplatz
+        // ★表示したい3つの駅名を指定（自由に書き換えてOK）
+        const stationNames = [
+            "S Gehrenseestr.",
+            "Seehausener Str.",
+            "S Hohenschönhausen"
+        ];
 
-        async function fetchDepartures() {
+        async function fetchAllDepartures() {
             const statusEl = document.getElementById('status');
             const boardEl = document.getElementById('board');
-            statusEl.innerText = "Status: データ取得中 (" + new Date().toLocaleTimeString() + ")...";
+            statusEl.innerText = "Status: データ更新中...";
 
             try {
-                const res = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=60&results=10`);
-                if (!res.ok) throw new Error("HTTPエラー Status: " + res.status);
-                
-                const data = await res.json();
-                
-                // データ構造の違い（配列かオブジェクトか）を安全に吸収
-                let list = [];
-                if (Array.isArray(data)) {
-                    list = data;
-                } else if (data && Array.isArray(data.departures)) {
-                    list = data.departures;
-                }
+                // 3つの駅のデータを並列で同時取得
+                const htmlBlocks = await Promise.all(stationNames.map(async (name) => {
+                    try {
+                        // 1. 駅IDの取得
+                        const locRes = await fetch(`https://v6.bvg.transport.rest/locations?query=${encodeURIComponent(name)}&results=1`);
+                        if (!locRes.ok) throw new Error("検索失敗");
+                        const locData = await locRes.json();
+                        if (!locData || locData.length === 0) throw new Error("駅が見つかりません");
+                        
+                        const stationId = locData[0].id;
+                        const officialName = locData[0].name;
 
-                if (list.length === 0) {
-                    boardEl.innerHTML = "<div>表示できる出発予定がありません</div>";
-                    statusEl.innerText = "Status: データ0件";
-                    return;
-                }
+                        // 2. 出発情報の取得（各駅4件ずつ表示）
+                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=60&results=4`);
+                        if (!depRes.ok) throw new Error("取得失敗");
+                        const data = await depRes.json();
+                        const list = Array.isArray(data) ? data : (data.departures || []);
 
-                boardEl.innerHTML = list.map(d => {
-                    const line = (d.line && d.line.name) ? d.line.name : "---";
-                    const dest = (d.destination && d.destination.name) ? d.destination.name : "不明";
-                    const timeVal = d.when || d.plannedWhen;
-                    const time = timeVal ? new Date(timeVal).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "--:--";
+                        let rowsHtml = list.map(d => {
+                            const line = (d.line && d.line.name) ? d.line.name : "---";
+                            const dest = (d.destination && d.destination.name) ? d.destination.name : "不明";
+                            const timeVal = d.when || d.plannedWhen;
+                            const time = timeVal ? new Date(timeVal).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "--:--";
+                            return `
+                                <div class="row">
+                                    <span class="line">${line}</span>
+                                    <span class="dest">${dest}</span>
+                                    <span class="time">${time}</span>
+                                </div>
+                            `;
+                        }).join('');
 
-                    return `
-                        <div class="row">
-                            <span class="line">${line}</span>
-                            <span class="dest">${dest}</span>
-                            <span class="time">${time}</span>
-                        </div>
-                    `;
-                }).join('');
+                        if (list.length === 0) rowsHtml = '<div class="row"><span class="dest">直近の出発予定なし</span></div>';
 
-                statusEl.innerText = "Status: 正常更新完了 (" + new Date().toLocaleTimeString() + ")";
+                        return `
+                            <div class="station-block">
+                                <div class="station-title">🚉 ${officialName}</div>
+                                ${rowsHtml}
+                            </div>
+                        `;
+                    } catch (e) {
+                        return `
+                            <div class="station-block">
+                                <div class="station-title">🚉 ${name}</div>
+                                <div class="error">⚠️ エラー: ${e.message}</div>
+                            </div>
+                        `;
+                    }
+                }));
+
+                boardEl.innerHTML = htmlBlocks.join('');
+                statusEl.innerText = `Status: 正常更新完了 (${new Date().toLocaleTimeString()})`;
 
             } catch (err) {
                 console.error(err);
                 statusEl.innerText = "Status: エラー発生";
-                boardEl.innerHTML = `<div class="error">⚠️ エラー: ${err.message}<br>通信またはAPI取得に失敗しました。</div>`;
             }
         }
 
-        fetchDepartures();
-        setInterval(fetchDepartures, 30000); // 30秒更新
+        fetchAllDepartures();
+        setInterval(fetchAllDepartures, 30000); // 30秒ごとに自動更新
     </script>
 </body>
 </html>
