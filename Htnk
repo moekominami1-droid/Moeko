@@ -1,0 +1,35 @@
+ <!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { background-color: #000; color: #ffcc00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; font-size: 24px; }
+        .row { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 10px 0; }
+        .line { font-weight: bold; width: 80px; }
+        .dest { flex-grow: 1; }
+        .time { width: 100px; text-align: right; }
+        /* LED風の光彩効果 */
+        h1, .row { text-shadow: 0 0 10px #ffcc00; }
+    </style>
+</head>
+<body>
+    <div id="board">Loading...</div>
+    <script>
+        const stationId = "900000100001"; // Alexanderplatz
+        async function fetchDepartures() {
+            const res = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=60&results=8`);
+            const data = await res.json();
+            const board = document.getElementById('board');
+            board.innerHTML = data.map(d => `
+                <div class="row">
+                    <span class="line">${d.line.name}</span>
+                    <span class="dest">${d.destination.name}</span>
+                    <span class="time">${new Date(d.when).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                </div>
+            `).join('');
+        }
+        fetchDepartures();
+        setInterval(fetchDepartures, 30000); // 30秒ごとに更新
+    </script>
+</body>
+</html>
