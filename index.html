@@ -28,7 +28,7 @@
             "S Hohenschönhausen"
         ];
 
-        // ★何分後以降の便を表示するか（ここを変更すれば5分後や15分後にもできます）
+        // ★何分後以降の便を表示するか
         const minMinutesAhead = 10;
 
         async function fetchAllDepartures() {
@@ -37,8 +37,8 @@
             statusEl.innerText = "Status: データ更新中...";
 
             try {
-                const now = Date.now();
-                const minOffsetMs = minMinutesAhead * 60 * 1000; // 分をミリ秒に変換
+                // 10分後の時刻（ISOフォーマット）を計算
+                const futureTime = new Date(Date.now() + minMinutesAhead * 60 * 1000).toISOString();
 
                 const htmlBlocks = await Promise.all(stationNames.map(async (name) => {
                     try {
@@ -50,19 +50,11 @@
                         const stationId = locData[0].id;
                         const officialName = locData[0].name;
 
-                        // フィルタリングで減ることを考慮して多め（12件）に取得
-                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=60&results=12`);
+                        // ★APIに対して「10分後の時刻から指定して4件取得する」ようにリクエスト
+                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?when=${encodeURIComponent(futureTime)}&duration=60&results=4`);
                         if (!depRes.ok) throw new Error("取得失敗");
                         const data = await depRes.json();
-                        const rawList = Array.isArray(data) ? data : (data.departures || []);
-
-                        // ★指定分（10分）以降に出発する便だけを抽出し、上位4件を取得
-                        const list = rawList.filter(d => {
-                            const timeVal = d.when || d.plannedWhen;
-                            if (!timeVal) return false;
-                            const depTime = new Date(timeVal).getTime();
-                            return (depTime - now) >= minOffsetMs;
-                        }).slice(0, 4);
+                        const list = Array.isArray(data) ? data : (data.departures || []);
 
                         let rowsHtml = list.map(d => {
                             const line = (d.line && d.line.name) ? d.line.name : "---";
