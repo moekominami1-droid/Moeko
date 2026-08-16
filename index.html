@@ -11,13 +11,8 @@
         .row { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 6px 0; }
         .line { font-weight: bold; width: 80px; color: #ffcc00; }
         .dest { flex-grow: 1; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-right: 10px; }
-        
-        /* 通常の時刻スタイル */
         .time { width: 110px; text-align: right; color: #ffcc00; }
-        
-        /* ★遅延発生時の赤色強調スタイル */
         .time.delayed { color: #ff4444; font-weight: bold; }
-        
         .status { color: #888; font-size: 13px; margin-bottom: 15px; border-bottom: 1px dashed #444; padding-bottom: 5px; }
         .error { color: #ff4444; font-size: 14px; }
     </style>
@@ -33,12 +28,18 @@
             "S Hohenschönhausen"
         ];
 
+        // ★何分後以降の便を表示するか（ここを変更すれば5分後や15分後にもできます）
+        const minMinutesAhead = 10;
+
         async function fetchAllDepartures() {
             const statusEl = document.getElementById('status');
             const boardEl = document.getElementById('board');
             statusEl.innerText = "Status: データ更新中...";
 
             try {
+                const now = Date.now();
+                const minOffsetMs = minMinutesAhead * 60 * 1000; // 分をミリ秒に変換
+
                 const htmlBlocks = await Promise.all(stationNames.map(async (name) => {
                     try {
                         const locRes = await fetch(`https://v6.bvg.transport.rest/locations?query=${encodeURIComponent(name)}&results=1`);
@@ -49,16 +50,24 @@
                         const stationId = locData[0].id;
                         const officialName = locData[0].name;
 
-                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=60&results=4`);
+                        // フィルタリングで減ることを考慮して多め（12件）に取得
+                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=60&results=12`);
                         if (!depRes.ok) throw new Error("取得失敗");
                         const data = await depRes.json();
-                        const list = Array.isArray(data) ? data : (data.departures || []);
+                        const rawList = Array.isArray(data) ? data : (data.departures || []);
+
+                        // ★指定分（10分）以降に出発する便だけを抽出し、上位4件を取得
+                        const list = rawList.filter(d => {
+                            const timeVal = d.when || d.plannedWhen;
+                            if (!timeVal) return false;
+                            const depTime = new Date(timeVal).getTime();
+                            return (depTime - now) >= minOffsetMs;
+                        }).slice(0, 4);
 
                         let rowsHtml = list.map(d => {
                             const line = (d.line && d.line.name) ? d.line.name : "---";
                             const dest = (d.destination && d.destination.name) ? d.destination.name : "不明";
                             
-                            // 遅延計算（秒数を分単位に変換 / 1分以上の遅延で判定）
                             const delaySeconds = d.delay || 0;
                             const delayMinutes = Math.floor(delaySeconds / 60);
                             const isDelayed = delayMinutes >= 1;
@@ -66,7 +75,6 @@
                             const timeVal = d.when || d.plannedWhen;
                             const timeStr = timeVal ? new Date(timeVal).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "--:--";
                             
-                            // 遅延時は「14:35 (+2)」のように赤色で表示
                             const timeDisplay = isDelayed ? `${timeStr} (+${delayMinutes})` : timeStr;
                             const timeClass = isDelayed ? "time delayed" : "time";
 
@@ -79,7 +87,9 @@
                             `;
                         }).join('');
 
-                        if (list.length === 0) rowsHtml = '<div class="row"><span class="dest">直近の出発予定なし</span></div>';
+                        if (list.length === 0) {
+                            rowsHtml = `<div class="row"><span class="dest">${minMinutesAhead}分後以降の出発予定なし</span></div>`;
+                        }
 
                         return `
                             <div class="station-block">
