@@ -13,10 +13,7 @@
         .dest { flex-grow: 1; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-right: 10px; }
         .time { width: 120px; text-align: right; color: #ffcc00; }
         
-        /* 遅延時：赤色太字 */
         .time.delayed { color: #ff4444; font-weight: bold; }
-        
-        /* ★運休時：赤色・打消し線 */
         .row.cancelled .dest { text-decoration: line-through; color: #888; }
         .time.cancelled { color: #ff4444; font-weight: bold; text-decoration: line-through; }
         
@@ -29,10 +26,11 @@
     <div id="board"></div>
 
     <script>
+        // 固定の駅情報（無駄な検索通信をカットしてエラー防止）
         const stations = [
-            { name: "S Gehrenseestr.", fallbackId: "900160014" },
-            { name: "Seehausener Str.", fallbackId: "900160513" },
-            { name: "S Hohenschönhausen", fallbackId: "900160003" }
+            { name: "S Gehrenseestr.", id: "900160014" },
+            { name: "Seehausener Str.", id: "900160513" },
+            { name: "S Hohenschönhausen", id: "900160003" }
         ];
 
         const minMinutesAhead = 10;
@@ -48,29 +46,14 @@
 
                 const htmlBlocks = await Promise.all(stations.map(async (st) => {
                     try {
-                        let stationId = st.fallbackId;
-                        let officialName = st.name;
-
-                        try {
-                            const locRes = await fetch(`https://v6.bvg.transport.rest/locations?query=${encodeURIComponent(st.name)}&results=1`);
-                            if (locRes.ok) {
-                                const locData = await locRes.json();
-                                if (locData && locData.length > 0) {
-                                    stationId = locData[0].id;
-                                    officialName = locData[0].name;
-                                }
-                            }
-                        } catch (e) {
-                            console.warn("位置検索スキップ:", e);
-                        }
-
-                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${stationId}/departures?duration=120&results=100`);
+                        // 通信エラーを起こさない適切な件数（results=20, duration=90）で取得
+                        const depRes = await fetch(`https://v6.bvg.transport.rest/stops/${st.id}/departures?duration=90&results=20`);
                         if (!depRes.ok) throw new Error("HTTP " + depRes.status);
                         
                         const data = await depRes.json();
                         const rawList = Array.isArray(data) ? data : (data.departures || []);
 
-                        // 10分後以降の便のみ抽出（※運休便も10分後以降なら判定対象に含む）
+                        // 10分後以降の便を抽出して上位4件を取得
                         const list = rawList.filter(d => {
                             const timeVal = d.when || d.plannedWhen;
                             if (!timeVal) return false;
@@ -82,10 +65,7 @@
                             const line = (d.line && d.line.name) ? d.line.name : "---";
                             const dest = (d.destination && d.destination.name) ? d.destination.name : "不明";
                             
-                            // ★運休（キャンセル）判定
                             const isCancelled = d.cancelled === true;
-
-                            // 遅延計算
                             const delaySeconds = d.delay || 0;
                             const delayMinutes = Math.floor(delaySeconds / 60);
                             const isDelayed = delayMinutes >= 1;
@@ -93,7 +73,6 @@
                             const timeVal = d.when || d.plannedWhen;
                             const timeStr = timeVal ? new Date(timeVal).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "--:--";
                             
-                            // 表示テキストとCSSクラスの制御
                             let timeDisplay = timeStr;
                             let timeClass = "time";
                             let rowClass = "row";
@@ -122,7 +101,7 @@
 
                         return `
                             <div class="station-block">
-                                <div class="station-title">🚉 ${officialName}</div>
+                                <div class="station-title">🚉 ${st.name}</div>
                                 ${rowsHtml}
                             </div>
                         `;
